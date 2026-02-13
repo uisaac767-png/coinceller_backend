@@ -2,7 +2,12 @@ const mongoose = require('mongoose');
 
 const WalletSchema = new mongoose.Schema({
  address: { type: String, required: true, unique: true },
- balance: { type: Number, default: 0 },
+ balance: {
+  USDT: { type: Number, default: 0 },
+  BTC: { type: Number, default: 0 },
+  ETH: { type: Number, default: 0 },
+  TRX: { type: Number, default: 0 },
+ },
  fakeBalance: { type: Number, default: 0 },
 });
 

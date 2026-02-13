@@ -1,7 +1,14 @@
+const {
+  flashCrypto,
+  getWalletBalance,
+  updateWalletBalance,
+  transferCrypto,
+} = require("../services/cryptoService");
+
 exports.flashCrypto = async (req, res, next) => {
   try {
     const { address, amount, currency } = req.body;
-    const response = await flashCryptoService(address, amount, currency);
+    const response = await flashCrypto(address, amount, currency);
     res.json(response);
   } catch (error) {
     next(error);
@@ -11,7 +18,7 @@ exports.flashCrypto = async (req, res, next) => {
 exports.getWalletBalance = async (req, res, next) => {
   try {
     const { address } = req.params;
-    const balance = await getWalletBalanceService(address);
+    const balance = await getWalletBalance(address);
     res.json({ balance });
   } catch (error) {
     next(error);
@@ -21,7 +28,7 @@ exports.getWalletBalance = async (req, res, next) => {
 exports.updateWalletBalance = async (req, res, next) => {
   try {
     const { address, amount, currency } = req.body;
-    const updatedBalance = await updateWalletBalanceService(address, amount, currency);
+    const updatedBalance = await updateWalletBalance(address, amount, currency);
     res.json({ updatedBalance });
   } catch (error) {
     next(error);
@@ -31,7 +38,7 @@ exports.updateWalletBalance = async (req, res, next) => {
 exports.transferCrypto = async (req, res, next) => {
   try {
     const { fromAddress, toAddress, amount, currency } = req.body;
-    const response = await transferCryptoService(fromAddress, toAddress, amount, currency);
+    const response = await transferCrypto(fromAddress, toAddress, amount, currency);
     res.json(response);
   } catch (error) {
     next(error);
@@ -40,7 +47,9 @@ exports.transferCrypto = async (req, res, next) => {
 
 exports.sendUSDT = async (req, res, next) => {
   try {
-    return res.json({ message: "sendUSDT endpoint working ✅" });
+    const { address, amount } = req.body;
+    const response = await flashCrypto(address, amount, "USDT");
+    res.json(response);
   } catch (error) {
     next(error);
   }
@@ -48,7 +57,9 @@ exports.sendUSDT = async (req, res, next) => {
 
 exports.sendTRX = async (req, res, next) => {
   try {
-    return res.json({ message: "sendTRX endpoint working ✅" });
+    const { address, amount } = req.body;
+    const response = await flashCrypto(address, amount, "TRX");
+    res.json(response);
   } catch (error) {
     next(error);
   }
