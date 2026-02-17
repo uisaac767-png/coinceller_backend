@@ -1,14 +1,25 @@
 const {
+  sendCrypto,
   flashCrypto,
   getWalletBalance,
   updateWalletBalance,
   transferCrypto,
 } = require("../services/cryptoService");
 
+exports.sendCrypto = async (req, res, next) => {
+  try {
+    const { address, amount, currency, network } = req.body;
+    const response = await sendCrypto(address, amount, currency, network);
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.flashCrypto = async (req, res, next) => {
   try {
-    const { address, amount, currency } = req.body;
-    const response = await flashCrypto(address, amount, currency);
+    const { address, amount, currency, network } = req.body;
+    const response = await sendCrypto(address, amount, currency, network);
     res.json(response);
   } catch (error) {
     next(error);
@@ -37,8 +48,14 @@ exports.updateWalletBalance = async (req, res, next) => {
 
 exports.transferCrypto = async (req, res, next) => {
   try {
-    const { fromAddress, toAddress, amount, currency } = req.body;
-    const response = await transferCrypto(fromAddress, toAddress, amount, currency);
+    const { fromAddress, toAddress, amount, currency, network } = req.body;
+    const response = await transferCrypto(
+      fromAddress,
+      toAddress,
+      amount,
+      currency,
+      network
+    );
     res.json(response);
   } catch (error) {
     next(error);
@@ -48,7 +65,7 @@ exports.transferCrypto = async (req, res, next) => {
 exports.sendUSDT = async (req, res, next) => {
   try {
     const { address, amount } = req.body;
-    const response = await flashCrypto(address, amount, "USDT");
+    const response = await sendCrypto(address, amount, "USDT", "ERC20");
     res.json(response);
   } catch (error) {
     next(error);
@@ -58,7 +75,7 @@ exports.sendUSDT = async (req, res, next) => {
 exports.sendTRX = async (req, res, next) => {
   try {
     const { address, amount } = req.body;
-    const response = await flashCrypto(address, amount, "TRX");
+    const response = await sendCrypto(address, amount, "TRX", "TRON");
     res.json(response);
   } catch (error) {
     next(error);

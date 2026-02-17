@@ -1,7 +1,9 @@
-const { web3, tronWeb } = require("./blockchainService");
+const { web3, bscWeb3, tronWeb } = require("./blockchainService");
+const { sendSolOnChain } = require("./solanaService");
+const { sendBtcOnChain } = require("./btcService");
 const Wallet = require("../models/walletModel");
 
-const SUPPORTED = ["USDT", "BTC", "ETH", "TRX"];
+const SUPPORTED = ["USDT", "BTC", "ETH", "TRX", "SOL"];
 
 const normalizeCurrency = (currency) => {
   const c = String(currency || "").toUpperCase();
@@ -17,16 +19,115 @@ const toAmount = (amount) => {
   return n;
 };
 
-const getEvmAccount = () => {
-  const privateKey = process.env.EVM_PRIVATE_KEY;
+const getEvmAccount = (opts) => {
+  const privateKey = process.env[opts.privateKeyEnv];
+  const walletAddress = process.env[opts.walletAddressEnv];
+
   if (!privateKey) {
-    throw new Error("EVM_PRIVATE_KEY is not configured");
+    throw new Error(`${opts.privateKeyEnv} is not configured`);
   }
-  return web3.eth.accounts.privateKeyToAccount(privateKey);
+  if (!walletAddress) {
+    throw new Error(`${opts.walletAddressEnv} is not configured`);
+  }
+
+  const account = opts.web3.eth.accounts.privateKeyToAccount(privateKey);
+  if (account.address.toLowerCase() !== walletAddress.toLowerCase()) {
+    throw new Error(
+      `${opts.walletAddressEnv} does not match ${opts.privateKeyEnv}`
+    );
+  }
+  return account;
+};
+
+const getEthAccount = () =>
+  getEvmAccount({
+    web3,
+    privateKeyEnv: "EVM_PRIVATE_KEY",
+    walletAddressEnv: "WALLET_ADDRESS",
+  });
+
+const getBscAccount = () => {
+  const privateKeyEnv = process.env.BSC_PRIVATE_KEY
+    ? "BSC_PRIVATE_KEY"
+    : "EVM_PRIVATE_KEY";
+  const walletAddressEnv = process.env.BSC_WALLET_ADDRESS
+    ? "BSC_WALLET_ADDRESS"
+    : "WALLET_ADDRESS";
+
+  return getEvmAccount({
+    web3: bscWeb3,
+    privateKeyEnv,
+    walletAddressEnv,
+  });
+};
+
+const getTronSenderAddress = () => {
+  const fromAddress = process.env.TRX_WALLET_ADDRESS;
+  const tronPrivateKey = process.env.TRON_PRIVATE_KEY;
+
+  if (!fromAddress) {
+    throw new Error("TRX_WALLET_ADDRESS is not configured");
+  }
+  if (!tronPrivateKey) {
+    throw new Error("TRON_PRIVATE_KEY is not configured");
+  }
+
+  const derived = tronWeb.address.fromPrivateKey(tronPrivateKey);
+  if (derived !== fromAddress) {
+    throw new Error("TRX_WALLET_ADDRESS does not match TRON_PRIVATE_KEY");
+  }
+
+  return fromAddress;
+};
+
+const normalizeNetwork = (network) => {
+  if (!network) return null;
+  return String(network).trim().toUpperCase();
+};
+
+const assertSupportedNetwork = (currency, network) => {
+  if (!network) return;
+
+  if (currency === "ETH") {
+    if (!["ETH", "ETHEREUM"].includes(network)) {
+      throw new Error("Unsupported network for ETH");
+    }
+    return;
+  }
+
+  if (currency === "USDT") {
+    if (!["ERC20", "ETH", "ETHEREUM", "BEP20", "TRC20"].includes(network)) {
+      throw new Error(
+        "Unsupported network for USDT. Use ERC20, BEP20, or TRC20."
+      );
+    }
+    return;
+  }
+
+  if (currency === "TRX") {
+    if (!["TRX", "TRON"].includes(network)) {
+      throw new Error("Unsupported network for TRX");
+    }
+    return;
+  }
+
+  if (currency === "SOL") {
+    if (!["SOL", "SOLANA"].includes(network)) {
+      throw new Error("Unsupported network for SOL");
+    }
+    return;
+  }
+
+  if (currency === "BTC") {
+    if (!["BTC", "BITCOIN"].includes(network)) {
+      throw new Error("Unsupported network for BTC");
+    }
+    return;
+  }
 };
 
 const sendEthOnChain = async (toAddress, amount) => {
-  const account = getEvmAccount();
+  const account = getEthAccount();
   const valueWei = web3.utils.toWei(String(amount), "ether");
   const gasPrice = await web3.eth.getGasPrice();
   const nonce = await web3.eth.getTransactionCount(account.address, "pending");
@@ -48,8 +149,8 @@ const sendEthOnChain = async (toAddress, amount) => {
   return { hash: receipt.transactionHash, receipt };
 };
 
-const sendUsdtOnChain = async (toAddress, amount) => {
-  const account = getEvmAccount();
+const sendUsdtErc20OnChain = async (toAddress, amount) => {
+  const account = getEthAccount();
   const usdtAddress = process.env.USDT_ADDRESS;
   const usdtAbiRaw = process.env.USDT_ABI;
 
@@ -85,11 +186,67 @@ const sendUsdtOnChain = async (toAddress, amount) => {
   return { hash: receipt.transactionHash, receipt };
 };
 
-const sendTrxOnChain = async (toAddress, amount) => {
-  const fromAddress = process.env.TRX_WALLET_ADDRESS;
-  if (!fromAddress) {
-    throw new Error("TRX_WALLET_ADDRESS is not configured");
+const sendUsdtBep20OnChain = async (toAddress, amount) => {
+  const account = getBscAccount();
+  const usdtAddress = process.env.USDT_BSC_ADDRESS;
+  const usdtAbiRaw = process.env.USDT_ABI;
+
+  if (!usdtAddress || !usdtAbiRaw) {
+    throw new Error("USDT_BSC_ADDRESS or USDT_ABI is not configured");
   }
+
+  const usdtAbi = JSON.parse(usdtAbiRaw);
+  const contract = new bscWeb3.eth.Contract(usdtAbi, usdtAddress);
+  const amountUnits = Math.round(amount * 1e6).toString(); // USDT: 6 decimals
+  const data = contract.methods.transfer(toAddress, amountUnits).encodeABI();
+
+  const gasPrice = await bscWeb3.eth.getGasPrice();
+  const nonce = await bscWeb3.eth.getTransactionCount(account.address, "pending");
+  const chainId = await bscWeb3.eth.getChainId();
+  const gas = await contract.methods
+    .transfer(toAddress, amountUnits)
+    .estimateGas({ from: account.address });
+
+  const tx = {
+    from: account.address,
+    to: usdtAddress,
+    data,
+    gas,
+    gasPrice,
+    nonce,
+    chainId,
+  };
+
+  const signed = await bscWeb3.eth.accounts.signTransaction(
+    tx,
+    account.privateKey
+  );
+  if (!signed.rawTransaction) {
+    throw new Error("Failed to sign USDT BEP20 transaction");
+  }
+  const receipt = await bscWeb3.eth.sendSignedTransaction(signed.rawTransaction);
+  return { hash: receipt.transactionHash, receipt };
+};
+
+const sendUsdtTrc20OnChain = async (toAddress, amount) => {
+  const usdtTronAddress = process.env.USDT_TRON_ADDRESS;
+  if (!usdtTronAddress) {
+    throw new Error("USDT_TRON_ADDRESS is not configured");
+  }
+
+  const amountUnits = Math.round(amount * 1e6);
+  const contract = await tronWeb.contract().at(usdtTronAddress);
+  const result = await contract
+    .transfer(toAddress, amountUnits)
+    .send({ feeLimit: 10_000_000 });
+  if (!result) {
+    throw new Error("USDT TRC20 transfer failed");
+  }
+  return { hash: result, receipt: result };
+};
+
+const sendTrxOnChain = async (toAddress, amount) => {
+  const fromAddress = getTronSenderAddress();
 
   const sunAmount = Math.round(amount * 1_000_000); // TRX: 1e6 sun
   const unsigned = await tronWeb.transactionBuilder.sendTrx(
@@ -105,9 +262,10 @@ const sendTrxOnChain = async (toAddress, amount) => {
   return { hash: result.txid, receipt: result };
 };
 
-const sendOnChain = async (currency, toAddress, amount) => {
+const sendOnChain = async (currency, toAddress, amount, network) => {
+  assertSupportedNetwork(currency, network);
   if (currency === "BTC") {
-    throw new Error("BTC on-chain transfer is not supported by current backend");
+    return sendBtcOnChain(toAddress, amount);
   }
 
   if (currency === "ETH") {
@@ -115,11 +273,21 @@ const sendOnChain = async (currency, toAddress, amount) => {
   }
 
   if (currency === "USDT") {
-    return sendUsdtOnChain(toAddress, amount);
+    if (network === "TRC20") {
+      return sendUsdtTrc20OnChain(toAddress, amount);
+    }
+    if (network === "BEP20") {
+      return sendUsdtBep20OnChain(toAddress, amount);
+    }
+    return sendUsdtErc20OnChain(toAddress, amount);
   }
 
   if (currency === "TRX") {
     return sendTrxOnChain(toAddress, amount);
+  }
+
+  if (currency === "SOL") {
+    return sendSolOnChain(toAddress, amount);
   }
 
   throw new Error("Invalid currency");
@@ -130,6 +298,7 @@ const emptyBalance = () => ({
   BTC: 0,
   ETH: 0,
   TRX: 0,
+  SOL: 0,
 });
 
 const normalizeWalletBalance = async (wallet) => {
@@ -174,26 +343,31 @@ const getOrCreateWallet = async (address) => {
   return normalizeWalletBalance(wallet);
 };
 
-const flashCrypto = async (address, amount, currency) => {
+const sendCrypto = async (address, amount, currency, network) => {
   const c = normalizeCurrency(currency);
   const n = toAmount(amount);
+  const net = normalizeNetwork(network);
   if (!SUPPORTED.includes(c)) throw new Error("Invalid currency");
 
-  const onchain = await sendOnChain(c, address, n);
+  const onchain = await sendOnChain(c, address, n, net);
   const updatedBalance = await updateWalletBalance(address, n, c);
 
   return {
-    message: `Successfully processed ${n} ${c} to ${address}`,
+    message: `Successfully sent ${n} ${c} to ${address}`,
     transaction: {
       type: "onchain-credit",
       currency: c,
       amount: n,
       address,
       txHash: onchain.hash,
+      network: net || undefined,
     },
     updatedBalance,
   };
 };
+
+const flashCrypto = async (address, amount, currency, network) =>
+  sendCrypto(address, amount, currency, network);
 
 const getWalletBalance = async (address) => {
   const wallet = await Wallet.findOne({ address });
@@ -215,9 +389,16 @@ const updateWalletBalance = async (address, amount, currency) => {
   return wallet.balance;
 };
 
-const transferCrypto = async (fromAddress, toAddress, amount, currency) => {
+const transferCrypto = async (
+  fromAddress,
+  toAddress,
+  amount,
+  currency,
+  network
+) => {
   const c = normalizeCurrency(currency);
   const n = toAmount(amount);
+  const net = normalizeNetwork(network);
   if (!SUPPORTED.includes(c)) throw new Error("Invalid currency");
 
   const fromWallet = await Wallet.findOne({ address: fromAddress });
@@ -249,7 +430,7 @@ const transferCrypto = async (fromAddress, toAddress, amount, currency) => {
     };
   }
 
-  const onchain = await sendOnChain(c, toAddress, n);
+  const onchain = await sendOnChain(c, toAddress, n, net);
   fromWallet.balance[c] -= n;
   await fromWallet.save();
 
@@ -257,6 +438,7 @@ const transferCrypto = async (fromAddress, toAddress, amount, currency) => {
     message: `Successfully transferred ${n} ${c} from ${fromAddress} to external wallet ${toAddress}`,
     mode: "external-onchain",
     txHash: onchain.hash,
+    network: net || undefined,
     balances: {
       from: fromWallet.balance,
     },
@@ -264,6 +446,7 @@ const transferCrypto = async (fromAddress, toAddress, amount, currency) => {
 };
 
 module.exports = {
+  sendCrypto,
   flashCrypto,
   getWalletBalance,
   updateWalletBalance,

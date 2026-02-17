@@ -7,6 +7,7 @@ const WalletSchema = new mongoose.Schema({
   BTC: { type: Number, default: 0 },
   ETH: { type: Number, default: 0 },
   TRX: { type: Number, default: 0 },
+  SOL: { type: Number, default: 0 },
  },
  fakeBalance: { type: Number, default: 0 },
 });
