@@ -2,6 +2,7 @@ const {
   sendCrypto,
   flashCrypto,
   getWalletBalance,
+  getOnchainBalance,
   updateWalletBalance,
   transferCrypto,
 } = require("../services/cryptoService");
@@ -36,6 +37,17 @@ exports.getWalletBalance = async (req, res, next) => {
   }
 };
 
+exports.getOnchainBalance = async (req, res, next) => {
+  try {
+    const { address } = req.params;
+    const { currency, network } = req.query;
+    const balance = await getOnchainBalance(address, currency, network);
+    res.json({ balance });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.updateWalletBalance = async (req, res, next) => {
   try {
     const { address, amount, currency } = req.body;
@@ -48,15 +60,24 @@ exports.updateWalletBalance = async (req, res, next) => {
 
 exports.transferCrypto = async (req, res, next) => {
   try {
-    const { fromAddress, toAddress, amount, currency, network, memo } =
-      req.body;
+    const {
+      fromAddress,
+      toAddress,
+      amount,
+      currency,
+      network,
+      memo,
+      forceOnChain,
+      external,
+    } = req.body;
     const response = await transferCrypto(
       fromAddress,
       toAddress,
       amount,
       currency,
       network,
-      memo
+      memo,
+      { forceOnChain, external }
     );
     res.json(response);
   } catch (error) {

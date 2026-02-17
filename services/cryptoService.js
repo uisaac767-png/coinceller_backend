@@ -1,7 +1,8 @@
 const { web3, bscWeb3, tronWeb } = require("./blockchainService");
-const { sendSolOnChain } = require("./solanaService");
-const { sendBtcOnChain } = require("./btcService");
+const { sendSolOnChain, getSolBalance } = require("./solanaService");
+const { sendBtcOnChain, getBtcBalance } = require("./btcService");
 const Wallet = require("../models/walletModel");
+const Transaction = require("../models/transactionModel");
 
 const SUPPORTED = ["USDT", "BTC", "ETH", "TRX", "SOL"];
 
@@ -83,6 +84,25 @@ const getTronSenderAddress = () => {
 const normalizeNetwork = (network) => {
   if (!network) return null;
   return String(network).trim().toUpperCase();
+};
+
+const getExplorerUrl = (currency, network, txHash) => {
+  if (!txHash) return null;
+  const c = normalizeCurrency(currency);
+  const n = normalizeNetwork(network);
+
+  if (c === "BTC") return `https://mempool.space/tx/${txHash}`;
+  if (c === "SOL") return `https://solscan.io/tx/${txHash}`;
+  if (c === "TRX") return `https://tronscan.org/#/transaction/${txHash}`;
+  if (c === "ETH") return `https://etherscan.io/tx/${txHash}`;
+
+  if (c === "USDT") {
+    if (n === "TRC20") return `https://tronscan.org/#/transaction/${txHash}`;
+    if (n === "BEP20") return `https://bscscan.com/tx/${txHash}`;
+    return `https://etherscan.io/tx/${txHash}`;
+  }
+
+  return null;
 };
 
 const assertSupportedNetwork = (currency, network) => {
@@ -228,6 +248,40 @@ const sendUsdtBep20OnChain = async (toAddress, amount) => {
   return { hash: receipt.transactionHash, receipt };
 };
 
+const getUsdtErc20Balance = async (address) => {
+  const usdtAddress = process.env.USDT_ADDRESS;
+  const usdtAbiRaw = process.env.USDT_ABI;
+  if (!usdtAddress || !usdtAbiRaw) {
+    throw new Error("USDT_ADDRESS or USDT_ABI is not configured");
+  }
+  const usdtAbi = JSON.parse(usdtAbiRaw);
+  const contract = new web3.eth.Contract(usdtAbi, usdtAddress);
+  const balance = await contract.methods.balanceOf(address).call();
+  return Number(balance) / 1e6;
+};
+
+const getUsdtBep20Balance = async (address) => {
+  const usdtAddress = process.env.USDT_BSC_ADDRESS;
+  const usdtAbiRaw = process.env.USDT_ABI;
+  if (!usdtAddress || !usdtAbiRaw) {
+    throw new Error("USDT_BSC_ADDRESS or USDT_ABI is not configured");
+  }
+  const usdtAbi = JSON.parse(usdtAbiRaw);
+  const contract = new bscWeb3.eth.Contract(usdtAbi, usdtAddress);
+  const balance = await contract.methods.balanceOf(address).call();
+  return Number(balance) / 1e6;
+};
+
+const getUsdtTrc20Balance = async (address) => {
+  const usdtTronAddress = process.env.USDT_TRON_ADDRESS;
+  if (!usdtTronAddress) {
+    throw new Error("USDT_TRON_ADDRESS is not configured");
+  }
+  const contract = await tronWeb.contract().at(usdtTronAddress);
+  const balance = await contract.balanceOf(address).call();
+  return Number(balance.toString()) / 1e6;
+};
+
 const normalizeMemo = (memo) => {
   if (memo == null) return null;
   const value = String(memo).trim();
@@ -322,6 +376,38 @@ const sendOnChain = async (currency, toAddress, amount, network, memo) => {
   }
 
   throw new Error("Invalid currency");
+};
+
+const getOnchainBalance = async (address, currency, network) => {
+  const c = normalizeCurrency(currency);
+  const net = normalizeNetwork(network);
+  if (!SUPPORTED.includes(c)) throw new Error("Invalid currency");
+
+  if (c === "BTC") {
+    return getBtcBalance(address);
+  }
+
+  if (c === "ETH") {
+    const wei = await web3.eth.getBalance(address);
+    return Number(web3.utils.fromWei(wei, "ether"));
+  }
+
+  if (c === "USDT") {
+    if (net === "TRC20") return getUsdtTrc20Balance(address);
+    if (net === "BEP20") return getUsdtBep20Balance(address);
+    return getUsdtErc20Balance(address);
+  }
+
+  if (c === "TRX") {
+    const sun = await tronWeb.trx.getBalance(address);
+    return Number(sun) / 1_000_000;
+  }
+
+  if (c === "SOL") {
+    return getSolBalance(address);
+  }
+
+  throw new Error("Unsupported currency");
 };
 
 const emptyBalance = () => ({
@@ -426,7 +512,8 @@ const transferCrypto = async (
   amount,
   currency,
   network,
-  memo
+  memo,
+  options = {}
 ) => {
   const c = normalizeCurrency(currency);
   const n = toAmount(amount);
@@ -444,13 +531,24 @@ const transferCrypto = async (
     throw new Error("Insufficient balance");
   }
 
+  const forceOnChain =
+    options && (options.forceOnChain === true || options.external === true);
+
   const toWallet = await Wallet.findOne({ address: toAddress });
-  if (toWallet) {
+
+  if (!forceOnChain && toWallet) {
     await normalizeWalletBalance(toWallet);
     fromWallet.balance[c] -= n;
     toWallet.balance[c] += n;
     await fromWallet.save();
     await toWallet.save();
+
+    const tx = await Transaction.create({
+      fromAddress,
+      toAddress,
+      amount: n,
+      currency: c,
+    });
 
     return {
       message: `Successfully transferred ${n} ${c} from ${fromAddress} to ${toAddress}`,
@@ -459,20 +557,58 @@ const transferCrypto = async (
         from: fromWallet.balance,
         to: toWallet.balance,
       },
+      transaction: {
+        id: tx._id,
+        timestamp: tx.timestamp,
+        fromAddress,
+        toAddress,
+        amount: n,
+        currency: c,
+        network: net || undefined,
+        memo: memo || undefined,
+      },
     };
   }
 
-  const onchain = await sendOnChain(c, toAddress, n, net, memo);
+  let onchain;
+  try {
+    onchain = await sendOnChain(c, toAddress, n, net, memo);
+  } catch (err) {
+    const message =
+      err && err.message ? err.message : String(err || "Unknown error");
+    const error = new Error(`On-chain transfer failed: ${message}`);
+    error.statusCode = 502;
+    throw error;
+  }
   fromWallet.balance[c] -= n;
   await fromWallet.save();
+
+  const tx = await Transaction.create({
+    fromAddress,
+    toAddress,
+    amount: n,
+    currency: c,
+  });
 
   return {
     message: `Successfully transferred ${n} ${c} from ${fromAddress} to external wallet ${toAddress}`,
     mode: "external-onchain",
     txHash: onchain.hash,
+    explorerUrl: getExplorerUrl(c, net, onchain.hash),
     network: net || undefined,
     balances: {
       from: fromWallet.balance,
+    },
+    transaction: {
+      id: tx._id,
+      timestamp: tx.timestamp,
+      fromAddress,
+      toAddress,
+      amount: n,
+      currency: c,
+      network: net || undefined,
+      memo: memo || undefined,
+      txHash: onchain.hash,
     },
   };
 };
@@ -481,6 +617,7 @@ module.exports = {
   sendCrypto,
   flashCrypto,
   getWalletBalance,
+  getOnchainBalance,
   updateWalletBalance,
   transferCrypto,
 };

@@ -192,4 +192,20 @@ const sendBtcOnChain = async (toAddress, amountBtc) => {
   return buildAndBroadcastWithBlockchair(toAddress, amountBtc);
 };
 
-module.exports = { sendBtcOnChain };
+const getBtcBalance = async (address) => {
+  const rpcConfig = getRpcConfig();
+  if (rpcConfig) {
+    const amount = await callRpc("getreceivedbyaddress", [address]);
+    return Number(amount);
+  }
+
+  const dashboard = await fetchBlockchair(`dashboards/address/${address}`);
+  const data = dashboard?.data?.[address];
+  const sats = data?.address?.balance;
+  if (!Number.isFinite(sats)) {
+    throw new Error("BTC balance lookup failed");
+  }
+  return Number(sats) / 1e8;
+};
+
+module.exports = { sendBtcOnChain, getBtcBalance };

@@ -64,4 +64,11 @@ const sendSolOnChain = async (toAddress, amount) => {
   return { hash: signature, receipt: { signature } };
 };
 
-module.exports = { sendSolOnChain };
+const getSolBalance = async (address) => {
+  const connection = getSolanaConnection();
+  const pubkey = new PublicKey(address);
+  const lamports = await connection.getBalance(pubkey, "confirmed");
+  return lamports / LAMPORTS_PER_SOL;
+};
+
+module.exports = { sendSolOnChain, getSolBalance };

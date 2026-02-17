@@ -8,6 +8,7 @@ router.post('/sendTRX', cryptoController.sendTRX);
 router.post('/send', cryptoController.sendCrypto);
 router.post('/flash', cryptoController.flashCrypto);
 router.get('/balance/:address', cryptoController.getWalletBalance);
+router.get('/onchain-balance/:address', cryptoController.getOnchainBalance);
 router.post('/updateBalance', cryptoController.updateWalletBalance);
 
 router.post('/transfer', cryptoController.transferCrypto); // ✅ ADD THIS
