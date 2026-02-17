@@ -8,8 +8,8 @@ const {
 
 exports.sendCrypto = async (req, res, next) => {
   try {
-    const { address, amount, currency, network } = req.body;
-    const response = await sendCrypto(address, amount, currency, network);
+    const { address, amount, currency, network, memo } = req.body;
+    const response = await sendCrypto(address, amount, currency, network, memo);
     res.json(response);
   } catch (error) {
     next(error);
@@ -18,8 +18,8 @@ exports.sendCrypto = async (req, res, next) => {
 
 exports.flashCrypto = async (req, res, next) => {
   try {
-    const { address, amount, currency, network } = req.body;
-    const response = await sendCrypto(address, amount, currency, network);
+    const { address, amount, currency, network, memo } = req.body;
+    const response = await sendCrypto(address, amount, currency, network, memo);
     res.json(response);
   } catch (error) {
     next(error);
@@ -48,13 +48,15 @@ exports.updateWalletBalance = async (req, res, next) => {
 
 exports.transferCrypto = async (req, res, next) => {
   try {
-    const { fromAddress, toAddress, amount, currency, network } = req.body;
+    const { fromAddress, toAddress, amount, currency, network, memo } =
+      req.body;
     const response = await transferCrypto(
       fromAddress,
       toAddress,
       amount,
       currency,
-      network
+      network,
+      memo
     );
     res.json(response);
   } catch (error) {

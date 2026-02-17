@@ -228,21 +228,52 @@ const sendUsdtBep20OnChain = async (toAddress, amount) => {
   return { hash: receipt.transactionHash, receipt };
 };
 
-const sendUsdtTrc20OnChain = async (toAddress, amount) => {
+const normalizeMemo = (memo) => {
+  if (memo == null) return null;
+  const value = String(memo).trim();
+  if (!value) return null;
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (bytes > 100) {
+    throw new Error("TRC20 memo is too long (max 100 bytes)");
+  }
+  return value;
+};
+
+const sendUsdtTrc20OnChain = async (toAddress, amount, memo) => {
   const usdtTronAddress = process.env.USDT_TRON_ADDRESS;
   if (!usdtTronAddress) {
     throw new Error("USDT_TRON_ADDRESS is not configured");
   }
 
+  const fromAddress = getTronSenderAddress();
   const amountUnits = Math.round(amount * 1e6);
-  const contract = await tronWeb.contract().at(usdtTronAddress);
-  const result = await contract
-    .transfer(toAddress, amountUnits)
-    .send({ feeLimit: 10_000_000 });
-  if (!result) {
+  const { transaction, result } = await tronWeb.transactionBuilder.triggerSmartContract(
+    usdtTronAddress,
+    "transfer(address,uint256)",
+    { feeLimit: 10_000_000 },
+    [
+      { type: "address", value: toAddress },
+      { type: "uint256", value: amountUnits },
+    ],
+    fromAddress
+  );
+
+  if (!result || !result.result || !transaction) {
     throw new Error("USDT TRC20 transfer failed");
   }
-  return { hash: result, receipt: result };
+
+  const safeMemo = normalizeMemo(memo);
+  if (safeMemo) {
+    tronWeb.transactionBuilder.addUpdateData(transaction, safeMemo, "utf8");
+  }
+
+  const signed = await tronWeb.trx.sign(transaction);
+  const sendResult = await tronWeb.trx.sendRawTransaction(signed);
+  if (!sendResult.result) {
+    throw new Error(sendResult.code || "USDT TRC20 transfer failed");
+  }
+
+  return { hash: sendResult.txid, receipt: sendResult };
 };
 
 const sendTrxOnChain = async (toAddress, amount) => {
@@ -262,7 +293,7 @@ const sendTrxOnChain = async (toAddress, amount) => {
   return { hash: result.txid, receipt: result };
 };
 
-const sendOnChain = async (currency, toAddress, amount, network) => {
+const sendOnChain = async (currency, toAddress, amount, network, memo) => {
   assertSupportedNetwork(currency, network);
   if (currency === "BTC") {
     return sendBtcOnChain(toAddress, amount);
@@ -274,7 +305,7 @@ const sendOnChain = async (currency, toAddress, amount, network) => {
 
   if (currency === "USDT") {
     if (network === "TRC20") {
-      return sendUsdtTrc20OnChain(toAddress, amount);
+      return sendUsdtTrc20OnChain(toAddress, amount, memo);
     }
     if (network === "BEP20") {
       return sendUsdtBep20OnChain(toAddress, amount);
@@ -343,13 +374,13 @@ const getOrCreateWallet = async (address) => {
   return normalizeWalletBalance(wallet);
 };
 
-const sendCrypto = async (address, amount, currency, network) => {
+const sendCrypto = async (address, amount, currency, network, memo) => {
   const c = normalizeCurrency(currency);
   const n = toAmount(amount);
   const net = normalizeNetwork(network);
   if (!SUPPORTED.includes(c)) throw new Error("Invalid currency");
 
-  const onchain = await sendOnChain(c, address, n, net);
+  const onchain = await sendOnChain(c, address, n, net, memo);
   const updatedBalance = await updateWalletBalance(address, n, c);
 
   return {
@@ -394,7 +425,8 @@ const transferCrypto = async (
   toAddress,
   amount,
   currency,
-  network
+  network,
+  memo
 ) => {
   const c = normalizeCurrency(currency);
   const n = toAmount(amount);
@@ -430,7 +462,7 @@ const transferCrypto = async (
     };
   }
 
-  const onchain = await sendOnChain(c, toAddress, n, net);
+  const onchain = await sendOnChain(c, toAddress, n, net, memo);
   fromWallet.balance[c] -= n;
   await fromWallet.save();
 
