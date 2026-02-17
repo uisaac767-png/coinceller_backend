@@ -77,6 +77,7 @@ app.use("/api/transaction", require("./routes/transactionRoutes"));
 app.use("/api/profile", require("./routes/profileRoutes"));
 app.use("/api/crypto", require("./routes/cryptoRoutes"));
 app.use("/api/market", require("./routes/marketRoutes"));
+app.use("/api/wallets", require("./routes/walletRoutes"));
 
 // ===============================
 // ✅ Root Route (Professional Status Check)

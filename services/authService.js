@@ -1,9 +1,10 @@
 const User = require('../models/userModel');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { generateAll } = require('./walletAddressService');
 
 const registerUser = async (userData) => {
- const { username, email, password } = userData;
+ const { username, email, password, displayName } = userData;
 
  // Check if user already exists
  const userExists = await User.findOne({ $or: [{ email }, { username }] });
@@ -16,10 +17,13 @@ const registerUser = async (userData) => {
  const hashedPassword = await bcrypt.hash(password, salt);
 
  // Create new user
+ const wallets = await generateAll();
  const newUser = new User({
  username,
+ displayName: displayName || username,
  email,
  password: hashedPassword,
+ wallets,
  });
 
  await newUser.save();
@@ -47,9 +51,17 @@ const loginUser = async (userData) => {
  id: user.id,
  },
  };
- const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
+ const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
 
- return token;
+ return {
+  token,
+  user: {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName || user.username,
+    email: user.email,
+  },
+ };
 };
 
 module.exports = { registerUser, loginUser };
